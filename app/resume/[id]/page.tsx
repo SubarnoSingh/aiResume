@@ -79,8 +79,8 @@ export default function ResumeView() {
       });
 
       if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Server returned ${response.status}: ${text}`);
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Server returned ${response.status}`);
       }
 
       const data = await response.json();
