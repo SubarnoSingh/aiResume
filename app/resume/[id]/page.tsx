@@ -1,23 +1,24 @@
-'use client';
+"use client";
 
-import { useEffect, useState, useRef } from 'react';
-import { useParams } from 'next/navigation';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Send, FileText } from 'lucide-react';
+import { useEffect, useState, useRef } from "react";
+import { useParams } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Send, FileText } from "lucide-react";
 
 interface Resume {
   id: string;
   name: string;
-  fileName: string;
-  fileData: string;
-  uploadedAt: string;
+  file_name: string;
+  file_url: string;
+  uploaded_at: string;
 }
 
 interface Message {
-  role: 'user' | 'ai';
+  role: "user" | "ai";
   content: string;
 }
 
@@ -26,16 +27,31 @@ export default function ResumeView() {
   const resumeId = params.id as string;
   const [resume, setResume] = useState<Resume | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [question, setQuestion] = useState('');
+  const [question, setQuestion] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Fetch resume from Supabase
   useEffect(() => {
-    const resumes = JSON.parse(localStorage.getItem('resumes') || '[]');
-    const found = resumes.find((r: Resume) => r.id === resumeId);
-    setResume(found || null);
+    const fetchResume = async () => {
+      const { data, error } = await supabase
+        .from("resumes")
+        .select("*")
+        .eq("id", resumeId)
+        .single();
+
+      if (error) {
+        console.error("Error fetching resume:", error.message);
+        setResume(null);
+      } else {
+        setResume(data);
+      }
+    };
+
+    fetchResume();
   }, [resumeId]);
 
+  // Scroll chat to bottom
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -46,32 +62,39 @@ export default function ResumeView() {
     e.preventDefault();
     if (!question.trim() || !resume) return;
 
-    const userMessage: Message = { role: 'user', content: question };
+    const userMessage: Message = { role: "user", content: question };
     setMessages((prev) => [...prev, userMessage]);
-    setQuestion('');
+    setQuestion("");
     setIsLoading(true);
 
     try {
-      const response = await fetch('/api/ask-resume', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/ask-resume", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           resumeId,
           question: question.trim(),
-          resumeData: resume.fileData,
+          resumeUrl: resume.file_url, // send file URL to backend
         }),
       });
 
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Server returned ${response.status}: ${text}`);
+      }
+
       const data = await response.json();
       const aiMessage: Message = {
-        role: 'ai',
-        content: data.answer || 'Sorry, I could not process your question.',
+        role: "ai",
+        content: data.answer || "Sorry, I could not process your question.",
       };
       setMessages((prev) => [...prev, aiMessage]);
-    } catch (error) {
+    } catch (error: any) {
       const errorMessage: Message = {
-        role: 'ai',
-        content: 'An error occurred while processing your question.',
+        role: "ai",
+        content: `An error occurred while processing your question: ${
+          error.message || String(error)
+        }`,
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
@@ -84,8 +107,12 @@ export default function ResumeView() {
       <div className="min-h-screen flex items-center justify-center px-4">
         <Card className="p-8 bg-white rounded-xl shadow-md text-center">
           <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Resume Not Found</h2>
-          <p className="text-gray-600">The resume you're looking for doesn't exist.</p>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2">
+            Resume Not Found
+          </h2>
+          <p className="text-gray-600">
+            The resume you&apos;re looking for doesn&apos;t exist.
+          </p>
         </Card>
       </div>
     );
@@ -94,8 +121,10 @@ export default function ResumeView() {
   return (
     <div className="min-h-screen px-4 md:px-20 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">{resume.name}'s Resume</h1>
-        <p className="text-gray-600">{resume.fileName}</p>
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">
+          {resume.name}&apos;s Resume
+        </h1>
+        <p className="text-gray-600">{resume.file_name}</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -103,7 +132,7 @@ export default function ResumeView() {
           <h2 className="text-xl font-bold text-gray-900 mb-4">PDF Preview</h2>
           <div className="border border-gray-200 rounded-xl overflow-hidden bg-gray-50 h-[600px] flex items-center justify-center">
             <iframe
-              src={resume.fileData}
+              src={resume.file_url} // use Supabase public URL
               className="w-full h-full"
               title="Resume PDF"
             />
@@ -118,19 +147,24 @@ export default function ResumeView() {
               {messages.length === 0 && (
                 <div className="text-center text-gray-500 py-8">
                   <p>Ask me anything about this resume!</p>
-                  <p className="text-sm mt-2">Try "What are the key skills?" or "Summarize this resume"</p>
+                  <p className="text-sm mt-2">
+                    Try &quot;What are the key skills?&quot; or &quot;Summarize
+                    this resume&quot;
+                  </p>
                 </div>
               )}
               {messages.map((msg, idx) => (
                 <div
                   key={idx}
                   className={`p-4 rounded-xl ${
-                    msg.role === 'user'
-                      ? 'bg-gray-200 text-gray-900 ml-8'
-                      : 'bg-gray-900 text-white mr-8'
+                    msg.role === "user"
+                      ? "bg-gray-200 text-gray-900 ml-8"
+                      : "bg-gray-900 text-white mr-8"
                   }`}
                 >
-                  <p className="leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                  <p className="leading-relaxed whitespace-pre-wrap">
+                    {msg.content}
+                  </p>
                 </div>
               ))}
             </div>
